@@ -31,7 +31,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
+    permissions:
+      contents: write  # 允许创建 Release
+      actions: write   # 允许操作 Artifacts
+      
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -49,6 +52,16 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+    # 【新增】使用插件清理空间并自动设置 Swap，解决权限报错
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
 
     - name: Clone source code
       working-directory: /workdir
@@ -147,8 +160,8 @@ jobs:
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
-        retain_days: 0
-        keep_minimum_runs: 2
+        retain_days: 1
+        keep_minimum_runs: 3
 
     - name: Remove old Releases
       uses: dev-drprasad/delete-older-releases@master
