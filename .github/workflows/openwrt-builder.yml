@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
 
 env:
+  # 强制使用 Node.js 24，解决 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
@@ -15,10 +17,15 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  # 优化编译环境
+  MAKE_JOBS: 4
+  GOCACHE: /tmp/go-cache
+  CCACHE_DIR: /workdir/openwrt/.ccache
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 360  # 设置6小时超时
     permissions:
       contents: write
       actions: write
@@ -40,6 +47,10 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        
+        # 修复 swapfile 权限问题
+        sudo swapoff /swapfile 2>/dev/null || true
+        sudo rm -f /swapfile 2>/dev/null || true
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
@@ -51,6 +62,20 @@ jobs:
         large-packages: true
         swap-storage: true
 
+    - name: Cache feeds and source
+      uses: actions/cache@v4
+      with:
+        path: |
+          /workdir/openwrt/dl
+          /workdir/openwrt/build_dir
+          /workdir/openwrt/staging_dir
+          /workdir/openwrt/tmp
+          /workdir/openwrt/.ccache
+          ~/.cache/ccache
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('openwrt/feeds.conf.default', '.config') }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-
+
     - name: Clone source code
       working-directory: /workdir
       run: |
@@ -59,7 +84,7 @@ jobs:
 
     - name: Load custom feeds
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        [ -e $FEEDS_CONF ] && cp $FEEDS_CONF openwrt/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
@@ -72,32 +97,97 @@ jobs:
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        [ -e files ] && cp -r files openwrt/files
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+        
+        # 显示配置摘要
+        echo "=== Build Configuration ==="
+        echo "Target: $(grep CONFIG_TARGET_BOARD .config | head -1)"
+        echo "Subtarget: $(grep CONFIG_TARGET_SUBTARGET .config | head -1)"
+        echo "Profile: $(grep CONFIG_TARGET_PROFILE .config | head -1)"
+        echo "Package count: $(grep '^CONFIG_PACKAGE_' .config | wc -l)"
+        echo "==========================="
 
     - name: Download package
       id: package
       run: |
         cd openwrt
         make defconfig
-        # 【修改点】增加重试逻辑，解决 Exit Code 25
-        make download -j8 || make download -j1 V=s
-        find dl -size -1024c -exec ls -l {} \;
+        
+        # 改进的重试逻辑，最多3次
+        for i in 1 2 3; do
+          echo "Download attempt $i/3"
+          if make download -j8 2>&1 | tee download.log; then
+            echo "Download successful on attempt $i"
+            break
+          elif [ $i -eq 3 ]; then
+            echo "Download failed after 3 attempts, trying single thread with verbose..."
+            make download -j1 V=s
+          else
+            echo "Download attempt $i failed, waiting 30 seconds before retry..."
+            sleep 30
+          fi
+        done
+        
+        # 清理无效的下载文件
         find dl -size -1024c -exec rm -f {} \;
+        # 修复可能的权限问题
+        chmod -R u+rw dl
+        
+        # 检查下载完整性
+        echo "Download directory size: $(du -sh dl | cut -f1)"
+        echo "Downloaded files count: $(find dl -type f | wc -l)"
 
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 显示系统资源
+        echo "Available memory:"
+        free -h
+        echo "CPU cores: $(nproc)"
+        echo "Disk space:"
+        df -h
+        
+        # 设置并行编译数（限制为4，避免内存不足）
+        JOBS=4
+        echo "Using $JOBS parallel jobs for compilation"
+        
+        # 启动 ccache
+        export PATH="/usr/lib/ccache:$PATH"
+        
+        # 编译，带重试逻辑
+        echo "Starting compilation with $JOBS threads..."
+        if make -j$JOBS 2>&1 | tee compile.log; then
+          echo "Compilation successful!"
+        else
+          echo "First compilation failed, trying with single thread..."
+          if make -j1 2>&1 | tee -a compile.log; then
+            echo "Single thread compilation successful!"
+          else
+            echo "Compilation failed, capturing error details..."
+            make -j1 V=s 2>&1 | tee compile_verbose.log
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        fi
+        
         echo "status=success" >> $GITHUB_OUTPUT
+        
+        # 生成设备名称
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        
+        # 检查编译产物
+        if [ -d bin/targets ]; then
+          echo "Build artifacts found:"
+          find bin/targets -type f -name "*.gz" -o -name "*.img" -o -name "*.bin" | head -10
+        fi
 
     - name: Check space usage
       if: (!cancelled())
@@ -105,12 +195,14 @@ jobs:
 
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled() && steps.compile.outputs.status == 'success'
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+        echo "Firmware files:"
+        ls -lh
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@v4
@@ -118,15 +210,34 @@ jobs:
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+        retention-days: 7
 
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.compile.outputs.status == 'success'
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        # 【修改点】删除了导致报错的 UPLOAD_GOFILE 未定义变量判断
-        echo "🍁 编译完成" >> release.txt
+        cat > release.txt << EOF
+        🍁 OpenWrt 编译完成
+
+        ### 编译信息
+        - 编译时间: $(date +"%Y-%m-%d %H:%M:%S")
+        - 目标设备: ${{ env.DEVICE_NAME }}
+        - 配置文件: .config
+        - 源码仓库: ${{ env.REPO_URL }}
+        - 分支: ${{ env.REPO_BRANCH }}
+
+        ### 固件说明
+        - 适用于树莓派4 (Raspberry Pi 4)
+        - 包含 Luci 界面
+        - 预装常用插件
+
+        ### 注意事项
+        1. 刷机前请备份数据
+        2. 首次启动可能需要几分钟
+        3. 默认IP: 192.168.1.1
+        4. 默认密码: password
+        EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
@@ -138,16 +249,30 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        make_latest: true
 
-    - name: Delete workflow runs
+    - name: Upload compile logs on failure
+      uses: actions/upload-artifact@v4
+      if: failure() && steps.compile.outputs.status != 'success'
+      with:
+        name: build-logs
+        path: |
+          openwrt/compile.log
+          openwrt/compile_verbose.log
+          openwrt/download.log
+          openwrt/.config
+          openwrt/logs/
+        retention-days: 7
+
+    - name: Delete old workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
         retain_days: 1
         keep_minimum_runs: 3
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.3.0
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      uses: dev-drprasad/delete-older-releases@v0.4.1
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.compile.outputs.status == 'success'
       with:
         keep_latest: 3
         delete_tags: true
