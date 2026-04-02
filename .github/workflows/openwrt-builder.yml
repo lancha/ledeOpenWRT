@@ -7,6 +7,7 @@ on:
 env:
   # 强制使用 Node.js 24，解决 Node.js 20 弃用警告
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: false
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
@@ -25,7 +26,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 设置6小时超时
+    timeout-minutes: 360
     permissions:
       contents: write
       actions: write
@@ -38,19 +39,55 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
+        # 清理工作目录（解决目录已存在的问题）
+        sudo rm -rf /workdir/openwrt
+        sudo rm -rf $GITHUB_WORKSPACE/openwrt
+        
+        # 清理磁盘空间
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+        sudo docker image prune --all --force 2>/dev/null || true
+        
+        # 更新包列表
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
+        
+        # 分批安装包
+        echo "Installing base packages..."
+        sudo -E apt-get -qq install -y --no-install-recommends \
+          build-essential ccache git unzip python3 python3-dev time \
+          file wget curl rsync
+        
+        echo "Installing development tools..."
+        sudo -E apt-get -qq install -y --no-install-recommends \
+          asciidoc binutils bzip2 gawk gettext libncurses5-dev libz-dev \
+          patch zlib1g-dev subversion flex uglifyjs gcc-multilib \
+          p7zip-full msmtp libssl-dev texinfo libreadline-dev \
+          libglib2.0-dev libxml2-dev libtool autoconf automake
+        
+        echo "Installing additional packages..."
+        sudo -E apt-get -qq install -y --no-install-recommends \
+          ack antlr3 autopoint bison cmake cpio device-tree-compiler \
+          fastjar gperf help2man intltool libelf-dev libfuse-dev \
+          libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
+          libpython3-dev mkisofs ninja-build pkgconf python2.7 \
+          python3-pyelftools python3-setuptools scons squashfs-tools \
+          swig texinfo xmlto xxd || true
+        
+        # 清理
+        sudo -E apt-get -qq autoremove --purge -y
         sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
+        
+        # 设置时区
+        sudo timedatectl set-timezone "$TZ" || sudo ln -sf /usr/share/zoneinfo/"$TZ" /etc/localtime
+        
+        # 创建工作目录
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
         
         # 修复 swapfile 权限问题
         sudo swapoff /swapfile 2>/dev/null || true
         sudo rm -f /swapfile 2>/dev/null || true
+        
+        echo "Initialization completed"
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
@@ -79,15 +116,31 @@ jobs:
     - name: Clone source code
       working-directory: /workdir
       run: |
+        # 确保目录不存在
+        rm -rf openwrt
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Load custom feeds
       run: |
-        [ -e $FEEDS_CONF ] && cp $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
+        if [ -f $FEEDS_CONF ]; then
+          cp $FEEDS_CONF openwrt/feeds.conf.default
+        fi
+        
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        
+        # 去重 feeds
+        if [ -f feeds.conf.default ]; then
+          awk '!seen[$0]++' feeds.conf.default > feeds.conf.default.tmp
+          mv feeds.conf.default.tmp feeds.conf.default
+          echo "Feeds configuration:"
+          cat feeds.conf.default
+        fi
+        
+        if [ -f $GITHUB_WORKSPACE/$DIY_P1_SH ]; then
+          chmod +x $GITHUB_WORKSPACE/$DIY_P1_SH
+          $GITHUB_WORKSPACE/$DIY_P1_SH
+        fi
 
     - name: Update feeds
       run: cd openwrt && ./scripts/feeds update -a
@@ -97,18 +150,25 @@ jobs:
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && cp -r files openwrt/files
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
+        if [ -d files ]; then
+          cp -r files openwrt/files
+        fi
+        
+        if [ -f $CONFIG_FILE ]; then
+          cp $CONFIG_FILE openwrt/.config
+        fi
+        
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        
+        if [ -f $GITHUB_WORKSPACE/$DIY_P2_SH ]; then
+          chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
+          $GITHUB_WORKSPACE/$DIY_P2_SH
+        fi
         
         # 显示配置摘要
         echo "=== Build Configuration ==="
-        echo "Target: $(grep CONFIG_TARGET_BOARD .config | head -1)"
-        echo "Subtarget: $(grep CONFIG_TARGET_SUBTARGET .config | head -1)"
-        echo "Profile: $(grep CONFIG_TARGET_PROFILE .config | head -1)"
-        echo "Package count: $(grep '^CONFIG_PACKAGE_' .config | wc -l)"
+        grep "CONFIG_TARGET" .config | head -5
+        echo "Package count: $(grep -c '^CONFIG_PACKAGE_' .config || echo 0)"
         echo "==========================="
 
     - name: Download package
@@ -117,61 +177,49 @@ jobs:
         cd openwrt
         make defconfig
         
-        # 改进的重试逻辑，最多3次
+        # 下载重试逻辑
         for i in 1 2 3; do
           echo "Download attempt $i/3"
-          if make download -j8 2>&1 | tee download.log; then
-            echo "Download successful on attempt $i"
+          if make download -j8; then
+            echo "Download successful"
             break
           elif [ $i -eq 3 ]; then
-            echo "Download failed after 3 attempts, trying single thread with verbose..."
+            echo "Download failed, trying single thread..."
             make download -j1 V=s
           else
-            echo "Download attempt $i failed, waiting 30 seconds before retry..."
+            echo "Retrying in 30 seconds..."
             sleep 30
           fi
         done
         
-        # 清理无效的下载文件
+        # 清理无效文件
         find dl -size -1024c -exec rm -f {} \;
-        # 修复可能的权限问题
         chmod -R u+rw dl
         
-        # 检查下载完整性
-        echo "Download directory size: $(du -sh dl | cut -f1)"
-        echo "Downloaded files count: $(find dl -type f | wc -l)"
+        echo "Download size: $(du -sh dl | cut -f1)"
 
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
         
-        # 显示系统资源
-        echo "Available memory:"
+        echo "System resources:"
         free -h
-        echo "CPU cores: $(nproc)"
-        echo "Disk space:"
         df -h
+        echo "CPU cores: $(nproc)"
         
-        # 设置并行编译数（限制为4，避免内存不足）
+        # 限制并行数
         JOBS=4
-        echo "Using $JOBS parallel jobs for compilation"
+        echo "Using $JOBS parallel jobs"
         
-        # 启动 ccache
-        export PATH="/usr/lib/ccache:$PATH"
-        
-        # 编译，带重试逻辑
-        echo "Starting compilation with $JOBS threads..."
-        if make -j$JOBS 2>&1 | tee compile.log; then
+        # 编译
+        if make -j$JOBS; then
           echo "Compilation successful!"
         else
-          echo "First compilation failed, trying with single thread..."
-          if make -j1 2>&1 | tee -a compile.log; then
-            echo "Single thread compilation successful!"
-          else
-            echo "Compilation failed, capturing error details..."
-            make -j1 V=s 2>&1 | tee compile_verbose.log
-            echo "status=failed" >> $GITHUB_OUTPUT
+          echo "Retrying with single thread..."
+          if ! make -j1; then
+            echo "Compilation failed!"
+            make -j1 V=s | tee compile_verbose.log
             exit 1
           fi
         fi
@@ -182,12 +230,6 @@ jobs:
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        
-        # 检查编译产物
-        if [ -d bin/targets ]; then
-          echo "Build artifacts found:"
-          find bin/targets -type f -name "*.gz" -o -name "*.img" -o -name "*.bin" | head -10
-        fi
 
     - name: Check space usage
       if: (!cancelled())
@@ -202,7 +244,7 @@ jobs:
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
         echo "Firmware files:"
-        ls -lh
+        ls -lh *.img.gz 2>/dev/null || ls -lh
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@v4
@@ -217,26 +259,27 @@ jobs:
       if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.compile.outputs.status == 'success'
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        cat > release.txt << EOF
+        cat > release.txt << 'EOF'
         🍁 OpenWrt 编译完成
 
-        ### 编译信息
-        - 编译时间: $(date +"%Y-%m-%d %H:%M:%S")
-        - 目标设备: ${{ env.DEVICE_NAME }}
-        - 配置文件: .config
-        - 源码仓库: ${{ env.REPO_URL }}
-        - 分支: ${{ env.REPO_BRANCH }}
+        ### 登录信息
+        - **管理IP**: 192.168.0.200
+        - **用户名**: root
+        - **密码**: password
 
         ### 固件说明
-        - 适用于树莓派4 (Raspberry Pi 4)
-        - 包含 Luci 界面
-        - 预装常用插件
+        - 适用于树莓派4 (Raspberry Pi 4) / ESXi ARM
+        - 包含 Luci 界面和常用插件
+        - 内核版本: Linux 6.6
+
+        ### 安装方法
+        1. 解压 .img.gz 文件
+        2. 使用 dd 或 Raspberry Pi Imager 写入 SD 卡
+        3. 或在 ESXi 中作为虚拟机安装
 
         ### 注意事项
-        1. 刷机前请备份数据
-        2. 首次启动可能需要几分钟
-        3. 默认IP: 192.168.1.1
-        4. 默认密码: password
+        - 首次启动后请立即修改密码
+        - 如无法访问，请检查电脑 IP 是否在同一网段
         EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -253,15 +296,13 @@ jobs:
 
     - name: Upload compile logs on failure
       uses: actions/upload-artifact@v4
-      if: failure() && steps.compile.outputs.status != 'success'
+      if: failure()
       with:
         name: build-logs
         path: |
-          openwrt/compile.log
           openwrt/compile_verbose.log
-          openwrt/download.log
           openwrt/.config
-          openwrt/logs/
+          openwrt/dl
         retention-days: 7
 
     - name: Delete old workflow runs
@@ -271,8 +312,8 @@ jobs:
         keep_minimum_runs: 3
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.3.0
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled() && steps.compile.outputs.status == 'success'
+      uses: dev-drprasad/delete-older-releases@v0.4.1
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 3
         delete_tags: true
