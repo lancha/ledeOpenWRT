@@ -88,21 +88,7 @@ jobs:
         sudo rm -f /swapfile 2>/dev/null || true
         
         echo "Initialization completed"
-    - name: Verify configuration
-      run: |
-        cd openwrt
-        echo "=== Checking for invalid options ==="
-        if grep -q "CONFIG_GRUB" .config; then
-          echo "ERROR: GRUB options found in armvirt config!"
-          grep "CONFIG_GRUB" .config
-          exit 1
-        fi
-        if grep -q "CONFIG_VMDK" .config; then
-          echo "ERROR: VMDK options found in armvirt config!"
-          exit 1
-        fi
-        echo "Configuration is valid for armvirt"
-    
+
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
@@ -185,6 +171,18 @@ jobs:
         echo "Package count: $(grep -c '^CONFIG_PACKAGE_' .config || echo 0)"
         echo "==========================="
 
+        echo "=== Checking for invalid options ==="
+        if grep -q "CONFIG_GRUB" .config; then
+          echo "ERROR: GRUB options found in armvirt config!"
+          grep "CONFIG_GRUB" .config
+          exit 1
+        fi
+        if grep -q "CONFIG_VMDK" .config; then
+          echo "ERROR: VMDK options found in armvirt config!"
+          exit 1
+        fi
+        echo "Configuration is valid for armvirt"
+    
     - name: Download package
       id: package
       run: |
