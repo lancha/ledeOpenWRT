@@ -182,7 +182,7 @@ jobs:
           exit 1
         fi
         echo "Configuration is valid for armvirt"
-     - name: Verify no GRUB packages
+    - name: Verify no GRUB packages
       run: |
         cd openwrt
         echo "=== Checking for invalid packages ==="
