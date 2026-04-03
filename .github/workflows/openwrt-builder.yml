@@ -182,7 +182,36 @@ jobs:
           exit 1
         fi
         echo "Configuration is valid for armvirt"
-    
+     - name: Verify no GRUB packages
+      run: |
+        cd openwrt
+        echo "=== Checking for invalid packages ==="
+        
+        # 检查是否有 GRUB2 包
+        if grep -q "^CONFIG_PACKAGE_grub2" .config; then
+          echo "ERROR: GRUB2 packages found in armvirt config!"
+          echo "Found these lines:"
+          grep "^CONFIG_PACKAGE_grub2" .config
+          exit 1
+        fi
+        
+        # 检查是否有 GRUB 配置
+        if grep -q "^CONFIG_GRUB" .config; then
+          echo "ERROR: GRUB options found in armvirt config!"
+          grep "^CONFIG_GRUB" .config
+          exit 1
+        fi
+        
+        # 检查目标架构是否正确
+        if ! grep -q "^CONFIG_TARGET_armvirt=y" .config; then
+          echo "ERROR: armvirt target not properly set!"
+          exit 1
+        fi
+        
+        echo "✓ Configuration verification passed"
+        echo "✓ No GRUB packages found"
+        echo "✓ Target architecture: armvirt"
+        
     - name: Download package
       id: package
       run: |
