@@ -184,10 +184,10 @@ CONFIG_PACKAGE_kmod-vmxnet3=y
 CONFIG_PACKAGE_kmod-virtio=y
 CONFIG_PACKAGE_kmod-virtio-net=y
 CONFIG_PACKAGE_kmod-virtio-pci=y
-EOF
+        EOF
 
         # 3. 运行 defconfig（会补充依赖）
-        make defconfig
+        make defconfi
     
         # 4. 强制删除所有 x86 相关配置
         echo "=== Removing x86 traces ==="
