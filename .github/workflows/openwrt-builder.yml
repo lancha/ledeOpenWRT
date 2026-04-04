@@ -173,13 +173,13 @@ jobs:
     
         # 写入 armvirt 配置
         cat >> .config << 'EOF'
-    CONFIG_TARGET_armvirt=y
-    CONFIG_TARGET_armvirt_64=y
-    CONFIG_TARGET_armvirt_64_DEVICE_generic=y
-    CONFIG_TARGET_BOARD="armvirt"
-    CONFIG_TARGET_SUBTARGET="64"
-    CONFIG_ARCH="aarch64"
-    EOF
+          CONFIG_TARGET_armvirt=y
+          CONFIG_TARGET_armvirt_64=y
+          CONFIG_TARGET_armvirt_64_DEVICE_generic=y
+          CONFIG_TARGET_BOARD="armvirt"
+          CONFIG_TARGET_SUBTARGET="64"
+          CONFIG_ARCH="aarch64"
+        EOF
     
         # 删除所有 x86 和 GRUB 相关
         sed -i '/x86/d' .config
