@@ -187,8 +187,12 @@ jobs:
         
         echo "=== Final verification ==="
         grep "CONFIG_TARGET_BOARD" .config
-        grep "CONFIG_TARGET_armvirt" .config
-        grep "CONFIG_PACKAGE_grub2" .config || echo "No GRUB2 (good)"
+        grep "CONFIG_TARGET_armvirt" .config || echo "armvirt found"
+        
+        if grep -q "CONFIG_PACKAGE_grub2" .config; then
+          echo "ERROR: GRUB2 packages still present!"
+          exit 1
+        fi
         
         if ! grep -q "CONFIG_TARGET_BOARD=\"armvirt\"" .config; then
           echo "ERROR: BOARD is not armvirt!"
