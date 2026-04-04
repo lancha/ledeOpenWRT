@@ -1,49 +1,34 @@
 #!/bin/bash
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File name: diy-part2.sh
-# Description: OpenWrt DIY script part 2 (After Update feeds)
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
 
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.0.200/g' package/base-files/files/bin/config_generate
 
-# Modify default theme
-#sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
-
-# Modify hostname
-#sed -i 's/OpenWrt/P3TERX-Router/g' package/base-files/files/bin/config_generate
-
 # ========== 强制设置为 armvirt 目标 ==========
 echo "=== Forcing armvirt target configuration ==="
 
-# 1. 完全删除旧配置（重要！）
+# 1. 完全删除旧配置
 rm -f .config
 
-# 2. 写入基础 armvirt 配置
+# 2. 写入完整的 armvirt 配置（不使用 make defconfig）
 cat > .config << 'EOF'
 CONFIG_TARGET_armvirt=y
 CONFIG_TARGET_armvirt_64=y
 CONFIG_TARGET_armvirt_64_DEVICE_generic=y
-EOF
+CONFIG_TARGET_BOARD="armvirt"
+CONFIG_TARGET_SUBTARGET="64"
+CONFIG_TARGET_PROFILE="DEVICE_generic"
+CONFIG_TARGET_ARCH_PACKAGES="aarch64_generic"
+CONFIG_ARCH="aarch64"
+CONFIG_TARGET_ROOTFS_EXT4FS=y
+CONFIG_TARGET_ROOTFS_TARGZ=y
+CONFIG_TARGET_IMAGES_GZIP=y
 
-# 3. 运行 defconfig 生成基础配置
-make defconfig
+# 禁用所有 GRUB 和 VMDK
+# CONFIG_GRUB_IMAGES is not set
+# CONFIG_GRUB_EFI_IMAGES is not set
+# CONFIG_VMDK_IMAGES is not set
 
-# 4. 删除所有 GRUB 和 x86 相关配置
-echo "=== Removing GRUB and x86 configs ==="
-sed -i '/CONFIG_GRUB/d' .config
-sed -i '/CONFIG_PACKAGE_grub2/d' .config
-sed -i '/CONFIG_TARGET_x86/d' .config
-
-# 5. 添加虚拟化驱动
-echo "=== Adding virtualization drivers ==="
-cat >> .config << 'EOF'
+# 添加虚拟化驱动
 CONFIG_PACKAGE_kmod-vmxnet3=y
 CONFIG_PACKAGE_kmod-virtio=y
 CONFIG_PACKAGE_kmod-virtio-net=y
@@ -51,14 +36,21 @@ CONFIG_PACKAGE_kmod-virtio-pci=y
 CONFIG_PACKAGE_kmod-scsi-core=y
 EOF
 
-# 6. 再次运行 defconfig 合并配置
+# 3. 运行 defconfig 补充依赖
 make defconfig
 
-# 7. 最终清理（确保没有残留）
-sed -i '/CONFIG_GRUB/d' .config
-sed -i '/CONFIG_TARGET_x86/d' .config
+# 4. 再次确保 armvirt 存在（防止被覆盖）
+echo "CONFIG_TARGET_armvirt=y" >> .config
+echo "CONFIG_TARGET_armvirt_64=y" >> .config
+echo "CONFIG_TARGET_armvirt_64_DEVICE_generic=y" >> .config
 
-# 8. 验证结果
+# 5. 删除所有残留的 x86 和 GRUB 配置
+sed -i '/CONFIG_TARGET_x86/d' .config
+sed -i '/CONFIG_GRUB/d' .config
+sed -i '/CONFIG_PACKAGE_grub2/d' .config
+sed -i '/CONFIG_VMDK/d' .config
+
+# 6. 最终验证
 echo "=== Final verification ==="
 echo "armvirt targets:"
 grep "^CONFIG_TARGET_armvirt" .config || echo "ERROR: armvirt not set!"
@@ -69,8 +61,7 @@ echo ""
 echo "GRUB configs (should be empty):"
 grep "^CONFIG_GRUB" .config || echo "No GRUB configs (good)"
 echo ""
-echo "Virtualization drivers:"
-grep "^CONFIG_PACKAGE_kmod-virtio" .config || echo "Warning: virtio drivers not found"
-grep "^CONFIG_PACKAGE_kmod-vmxnet3" .config || echo "Warning: vmxnet3 not found"
+echo "VMDK configs (should be empty):"
+grep "^CONFIG_VMDK" .config || echo "No VMDK configs (good)"
 
 echo "Configuration fix applied"
