@@ -304,7 +304,7 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         cat > release.txt << 'EOF'
-🍁 OpenWrt 编译完成
+OpenWrt 编译完成
 
 ### 登录信息
 - **管理IP**: 192.168.0.200
