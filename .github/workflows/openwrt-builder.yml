@@ -167,6 +167,9 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-virtio=y" >> .config
         echo "CONFIG_PACKAGE_kmod-virtio-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-virtio-pci=y" >> .config
+
+        # 在 defconfig 之前强制删除 x86
+        sed -i '/x86/d' .config
         
         make defconfig
         
@@ -177,6 +180,10 @@ jobs:
         make defconfig
         
         sed -i '/CONFIG_PACKAGE_grub2/d' .config
+
+        # 强制确保 BOARD 是 armvirt
+        sed -i 's/CONFIG_TARGET_BOARD="x86"/CONFIG_TARGET_BOARD="armvirt"/g' .config
+        sed -i 's/CONFIG_TARGET_BOARD="x86_64"/CONFIG_TARGET_BOARD="armvirt"/g' .config
         
         echo "=== Final verification ==="
         grep "CONFIG_TARGET_BOARD" .config
