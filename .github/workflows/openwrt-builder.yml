@@ -150,66 +150,83 @@ jobs:
 
     - name: Load custom configuration
       run: |
-        if [ -d files ]; then
-          cp -r files openwrt/files
-        fi
-    
-        if [ -f $CONFIG_FILE ]; then
-          cp $CONFIG_FILE openwrt/.config
-        fi
-    
         cd openwrt
     
-        if [ -f $GITHUB_WORKSPACE/$DIY_P2_SH ]; then
-          chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
-          $GITHUB_WORKSPACE/$DIY_P2_SH
-        fi
+        # 1. 完全删除旧配置
+        rm -f .config
     
-        # ========== 强制覆盖为 armvirt（关键修复） ==========
-        echo "=== FORCING ARMVIRT TARGET ==="
-    
-        # 删除所有目标配置
-        sed -i '/CONFIG_TARGET_/d' .config
-    
-        # 写入 armvirt 配置
-        cat >> .config << 'EOF'
-          CONFIG_TARGET_armvirt=y
-          CONFIG_TARGET_armvirt_64=y
-          CONFIG_TARGET_armvirt_64_DEVICE_generic=y
-          CONFIG_TARGET_BOARD="armvirt"
-          CONFIG_TARGET_SUBTARGET="64"
-          CONFIG_ARCH="aarch64"
-        EOF
-    
-        # 删除所有 x86 和 GRUB 相关
-        sed -i '/x86/d' .config
-        sed -i '/grub/d' .config
-        sed -i '/GRUB/d' .config
-        sed -i '/VMDK/d' .config
-    
-        # 重新生成配置
+        # 2. 只写入 armvirt 目标配置（不运行 defconfig）
+          cat > .config << 'EOF'
+              CONFIG_TARGET_armvirt=y
+              CONFIG_TARGET_armvirt_64=y
+              CONFIG_TARGET_armvirt_64_DEVICE_generic=y
+              CONFIG_TARGET_BOARD="armvirt"
+              CONFIG_TARGET_SUBTARGET="64"
+              CONFIG_TARGET_PROFILE="DEVICE_generic"
+              CONFIG_ARCH="aarch64"
+              CONFIG_TARGET_ARCH_PACKAGES="aarch64_generic"
+
+              # 禁用所有 x86 相关
+              # CONFIG_TARGET_x86 is not set
+              # CONFIG_TARGET_x86_64 is not set
+
+              # 禁用 GRUB
+              # CONFIG_GRUB_IMAGES is not set
+              # CONFIG_GRUB_EFI_IMAGES is not set
+
+              # 文件系统
+              CONFIG_TARGET_ROOTFS_EXT4FS=y
+              CONFIG_TARGET_ROOTFS_TARGZ=y
+              CONFIG_TARGET_IMAGES_GZIP=y
+
+              # 虚拟化驱动
+              CONFIG_PACKAGE_kmod-vmxnet3=y
+              CONFIG_PACKAGE_kmod-virtio=y
+              CONFIG_PACKAGE_kmod-virtio-net=y
+              CONFIG_PACKAGE_kmod-virtio-pci=y
+          EOF
+
+        # 3. 运行 defconfig（会补充依赖）
         make defconfig
     
-        # 再次确认（防止被覆盖）
+        # 4. 强制删除所有 x86 相关配置
+        echo "=== Removing x86 traces ==="
         sed -i '/CONFIG_TARGET_x86/d' .config
+        sed -i '/CONFIG_GRUB/d' .config
+        sed -i '/CONFIG_VMDK/d' .config
+        sed -i '/x86_64/d' .config
+    
+        # 5. 强制设置 BOARD 为 armvirt
+        sed -i 's/CONFIG_TARGET_BOARD="x86"/CONFIG_TARGET_BOARD="armvirt"/g' .config
+        sed -i 's/CONFIG_TARGET_BOARD="x86_64"/CONFIG_TARGET_BOARD="armvirt"/g' .config
+    
+        # 6. 确保 armvirt 配置正确
         echo "CONFIG_TARGET_armvirt=y" >> .config
         echo "CONFIG_TARGET_armvirt_64=y" >> .config
+        echo "CONFIG_TARGET_BOARD=\"armvirt\"" >> .config
     
-        # 显示最终目标
-        echo "=== FINAL TARGET CONFIGURATION ==="
-        grep "^CONFIG_TARGET_" .config
-        echo "==========================="
+        # 7. 最终验证
+        echo "=== Final verification ==="
+        echo "CONFIG_TARGET_BOARD:"
+        grep "CONFIG_TARGET_BOARD" .config
+        echo ""
+        echo "armvirt targets:"
+        grep "CONFIG_TARGET_armvirt" .config
+        echo ""
+        echo "x86 targets (should be empty):"
+        grep "CONFIG_TARGET_x86" .config || echo "No x86 targets (good)"
     
-        # 如果仍然是 x86，直接报错
-        if grep -q "CONFIG_TARGET_x86" .config; then
-          echo "ERROR: x86 target still present!"
+        if grep -q "CONFIG_TARGET_BOARD=\"x86\"" .config; then
+          echo "ERROR: BOARD is still x86!"
           exit 1
         fi
     
-        # 显示配置摘要
-        echo "=== Build Configuration ==="
-        grep "CONFIG_TARGET" .config | head -5
-        echo "Package count: $(grep -c '^CONFIG_PACKAGE_' .config || echo 0)"    
+        if ! grep -q "CONFIG_TARGET_BOARD=\"armvirt\"" .config; then
+          echo "ERROR: BOARD is not armvirt!"
+          exit 1
+        fi
+    
+        echo "✓ Configuration is valid for armvirt"  
         
     - name: Verify no GRUB packages
       run: |
