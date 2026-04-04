@@ -304,27 +304,27 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         cat > release.txt << 'EOF'
-OpenWrt 编译完成
+        OpenWrt 编译完成
 
-### 登录信息
-- **管理IP**: 192.168.0.200
-- **用户名**: root
-- **密码**: password
+        ### 登录信息
+        - **管理IP**: 192.168.0.200
+        - **用户名**: root
+        - **密码**: password
 
-### 固件说明
-- 适用于树莓派4 (Raspberry Pi 4) / ESXi ARM
-- 包含 Luci 界面和常用插件
-- 内核版本: Linux 6.6
+        ### 固件说明
+        - 适用于树莓派4 (Raspberry Pi 4) / ESXi ARM
+        - 包含 Luci 界面和常用插件
+        - 内核版本: Linux 6.6
 
-### 安装方法
-1. 解压 .img.gz 文件
-2. 使用 dd 或 Raspberry Pi Imager 写入 SD 卡
-3. 或在 ESXi 中作为虚拟机安装
-
-### 注意事项
-- 首次启动后请立即修改密码
-- 如无法访问，请检查电脑 IP 是否在同一网段
-EOF
+        ### 安装方法
+        1. 解压 .img.gz 文件
+        2. 使用 dd 或 Raspberry Pi Imager 写入 SD 卡
+        3. 或在 ESXi 中作为虚拟机安装
+        
+        ### 注意事项
+        - 首次启动后请立即修改密码
+        - 如无法访问，请检查电脑 IP 是否在同一网段
+        EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
