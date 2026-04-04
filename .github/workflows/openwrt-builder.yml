@@ -153,35 +153,64 @@ jobs:
         if [ -d files ]; then
           cp -r files openwrt/files
         fi
-        
+    
         if [ -f $CONFIG_FILE ]; then
           cp $CONFIG_FILE openwrt/.config
         fi
-        
+    
         cd openwrt
-        
+    
         if [ -f $GITHUB_WORKSPACE/$DIY_P2_SH ]; then
           chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
           $GITHUB_WORKSPACE/$DIY_P2_SH
         fi
-        
+    
+        # ========== 强制覆盖为 armvirt（关键修复） ==========
+        echo "=== FORCING ARMVIRT TARGET ==="
+    
+        # 删除所有目标配置
+        sed -i '/CONFIG_TARGET_/d' .config
+    
+        # 写入 armvirt 配置
+        cat >> .config << 'EOF'
+    CONFIG_TARGET_armvirt=y
+    CONFIG_TARGET_armvirt_64=y
+    CONFIG_TARGET_armvirt_64_DEVICE_generic=y
+    CONFIG_TARGET_BOARD="armvirt"
+    CONFIG_TARGET_SUBTARGET="64"
+    CONFIG_ARCH="aarch64"
+    EOF
+    
+        # 删除所有 x86 和 GRUB 相关
+        sed -i '/x86/d' .config
+        sed -i '/grub/d' .config
+        sed -i '/GRUB/d' .config
+        sed -i '/VMDK/d' .config
+    
+        # 重新生成配置
+        make defconfig
+    
+        # 再次确认（防止被覆盖）
+        sed -i '/CONFIG_TARGET_x86/d' .config
+        echo "CONFIG_TARGET_armvirt=y" >> .config
+        echo "CONFIG_TARGET_armvirt_64=y" >> .config
+    
+        # 显示最终目标
+        echo "=== FINAL TARGET CONFIGURATION ==="
+        grep "^CONFIG_TARGET_" .config
+        echo "==========================="
+    
+        # 如果仍然是 x86，直接报错
+        if grep -q "CONFIG_TARGET_x86" .config; then
+          echo "ERROR: x86 target still present!"
+          exit 1
+        fi
+    
         # 显示配置摘要
         echo "=== Build Configuration ==="
         grep "CONFIG_TARGET" .config | head -5
-        echo "Package count: $(grep -c '^CONFIG_PACKAGE_' .config || echo 0)"
-        echo "==========================="
-
-        echo "=== Checking for invalid options ==="
-        if grep -q "CONFIG_GRUB" .config; then
-          echo "ERROR: GRUB options found in armvirt config!"
-          grep "CONFIG_GRUB" .config
-          exit 1
-        fi
-        if grep -q "CONFIG_VMDK" .config; then
-          echo "ERROR: VMDK options found in armvirt config!"
-          exit 1
-        fi
-        echo "Configuration is valid for armvirt"
+        echo "Package count: $(grep -c '^CONFIG_PACKAGE_' .config || echo 0)"    
+        
     - name: Verify no GRUB packages
       run: |
         cd openwrt
