@@ -177,6 +177,7 @@ CONFIG_PACKAGE_kmod-virtio=y
 CONFIG_PACKAGE_kmod-virtio-net=y
 CONFIG_PACKAGE_kmod-virtio-pci=y
 EOF
+        
 
         # 3. 运行 defconfig
         make defconfig
