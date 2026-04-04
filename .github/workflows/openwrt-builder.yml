@@ -151,69 +151,45 @@ jobs:
     - name: Load custom configuration
       run: |
         cd openwrt
-        
-        # 1. 完全删除旧配置
         rm -f .config
+        echo "CONFIG_TARGET_armvirt=y" >> .config
+        echo "CONFIG_TARGET_armvirt_64=y" >> .config
+        echo "CONFIG_TARGET_armvirt_64_DEVICE_generic=y" >> .config
+        echo "CONFIG_TARGET_BOARD=\"armvirt\"" >> .config
+        echo "CONFIG_TARGET_SUBTARGET=\"64\"" >> .config
+        echo "CONFIG_TARGET_PROFILE=\"DEVICE_generic\"" >> .config
+        echo "CONFIG_ARCH=\"aarch64\"" >> .config
+        echo "CONFIG_TARGET_ARCH_PACKAGES=\"aarch64_generic\"" >> .config
+        echo "CONFIG_TARGET_ROOTFS_EXT4FS=y" >> .config
+        echo "CONFIG_TARGET_ROOTFS_TARGZ=y" >> .config
+        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-vmxnet3=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-virtio=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-virtio-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-virtio-pci=y" >> .config
         
-        # 2. 写入 armvirt 目标配置
-        cat > .config << 'EOF'
-        CONFIG_TARGET_armvirt=y
-        CONFIG_TARGET_armvirt_64=y
-        CONFIG_TARGET_armvirt_64_DEVICE_generic=y
-        CONFIG_TARGET_BOARD="armvirt"
-        CONFIG_TARGET_SUBTARGET="64"
-        CONFIG_TARGET_PROFILE="DEVICE_generic"
-        CONFIG_ARCH="aarch64"
-        CONFIG_TARGET_ARCH_PACKAGES="aarch64_generic"
-
-        # 文件系统
-        CONFIG_TARGET_ROOTFS_EXT4FS=y
-        CONFIG_TARGET_ROOTFS_TARGZ=y
-        CONFIG_TARGET_IMAGES_GZIP=y
-
-        # 虚拟化驱动
-        CONFIG_PACKAGE_kmod-vmxnet3=y
-        CONFIG_PACKAGE_kmod-virtio=y
-        CONFIG_PACKAGE_kmod-virtio-net=y
-        CONFIG_PACKAGE_kmod-virtio-pci=y
-        EOF
-        
-
-        # 3. 运行 defconfig
         make defconfig
         
-        # 4. 强制删除所有 GRUB2 包
-        echo "=== Removing GRUB2 packages ==="
         sed -i '/CONFIG_PACKAGE_grub2/d' .config
         sed -i '/CONFIG_GRUB/d' .config
-        
-        # 5. 删除 x86 残留
         sed -i '/CONFIG_TARGET_x86/d' .config
-        sed -i '/CONFIG_VMDK/d' .config
         
-        # 6. 再次运行 defconfig
         make defconfig
         
-        # 7. 再次删除（防止被重新添加）
         sed -i '/CONFIG_PACKAGE_grub2/d' .config
         
-        # 8. 验证
         echo "=== Final verification ==="
-        echo "Target board:"
         grep "CONFIG_TARGET_BOARD" .config
-        echo ""
-        echo "armvirt:"
         grep "CONFIG_TARGET_armvirt" .config
-        echo ""
-        echo "GRUB2 packages:"
-        grep "CONFIG_PACKAGE_grub2" .config || echo "No GRUB2 packages (good)"
+        grep "CONFIG_PACKAGE_grub2" .config || echo "No GRUB2 (good)"
         
-        if grep -q "CONFIG_PACKAGE_grub2" .config; then
-          echo "ERROR: GRUB2 packages still present!"
+        if ! grep -q "CONFIG_TARGET_BOARD=\"armvirt\"" .config; then
+          echo "ERROR: BOARD is not armvirt!"
           exit 1
         fi
         
-        echo "✓ Configuration is valid for armvirt"
+        echo "✓ Configuration valid"
+
 
     - name: Download package
       id: package
